@@ -45,3 +45,8 @@ class UserRepository:
         Retrieve a user by their email.
         """
         return self.db.query(User).filter(User.email == email).first()
+    def get_by_id(self, user_id: int):
+        """ 
+        retrieve a user by their ID.
+        """
+        return self.db.query(User).filter(User.id == user_id).first()

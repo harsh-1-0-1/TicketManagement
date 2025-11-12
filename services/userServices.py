@@ -1,7 +1,7 @@
 # services/user_service.py
 from repository.userRepository import UserRepository
-from utils.security import hash_password  # <-- we'll define this in utils/security.py
-
+from utils.security import hash_password, get_subject_from_token  # added get_subject_from_token
+from fastapi import HTTPException, status
 class UserService:
     def __init__(self, repo: UserRepository):
         self.repo = repo
@@ -31,4 +31,32 @@ class UserService:
         user = self.repo.delete_user(user_id)
         if not user:
             raise ValueError("User not found.")
+        return user
+
+    
+    def get_user_by_token(self, token: str):
+        """
+        Decode token to get subject (may be user id or email) and return the user object.
+        Raises HTTPException(401) if token invalid or user not found.
+        """
+        # will raise HTTPException if token invalid/expired
+        subject = get_subject_from_token(token)
+
+        user = None
+
+        # if subject looks like an integer, try id lookup
+        try:
+            uid = int(subject)
+        except (TypeError, ValueError):
+            uid = None
+
+        if uid is not None and hasattr(self.repo, "get_by_id"):
+            user = self.repo.get_by_id(uid)
+# fallback: try email lookup
+        if user is None and hasattr(self.repo, "get_by_email"):
+            user = self.repo.get_by_email(subject)
+
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
+
         return user

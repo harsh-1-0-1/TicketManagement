@@ -7,7 +7,7 @@ from repository.userRepository import UserRepository
 
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")  # modify tokenUrl as needed
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")# modify tokenUrl as needed
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
 
@@ -21,3 +21,4 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             detail="Invalid authentication credentials"
         )
     return user
+

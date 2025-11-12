@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
-
+from controller.authController import router as auth_router
 from controller.userController import router as users_router
 from controller.ticketController import router  as ticket_router # Import the ticket router
 from database import Base, engine, DB_FILE  # optional DB_FILE if you check path
@@ -40,3 +40,4 @@ app.add_middleware(
 
 app.include_router(users_router, prefix="/users", tags=["users"])
 app.include_router(ticket_router, prefix="/tickets", tags=["tickets"])  # Include ticket router
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
