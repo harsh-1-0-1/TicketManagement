@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Ticket Shop — Razorpay Checkout + Verify</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{--accent:#2563eb;--muted:#6b7280;--card:#fff;--bg:#f3f4f6}
+    body{font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial; background:var(--bg); margin:0; padding:20px;color:#111}
+    .container{max-width:1000px;margin:0 auto}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    h1{font-size:20px;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    .card{background:var(--card);padding:16px;border-radius:10px;box-shadow:0 6px 18px rgba(15,23,42,0.06);margin-bottom:16px}
+    .tickets{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+    .ticket{padding:14px;border-radius:8px;border:1px solid #e6e9ef;background:white;display:flex;flex-direction:column;gap:8px}
+    .ticket h3{margin:0;font-size:16px}
+    .ticket p{margin:0;color:var(--muted);font-size:13px}
+    .ticket .price{font-weight:600;font-size:16px}
+    button.primary{background:var(--accent);color:white;border:none;padding:10px 12px;border-radius:8px;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid #ddd;padding:8px 10px;border-radius:8px;cursor:pointer}
+    .flex{display:flex;gap:8px;align-items:center}
+    .small{font-size:13px;color:var(--muted)}
+    label{font-size:13px;color:var(--muted)}
+    input[type="text"], input[type="number"] {padding:8px;border-radius:6px;border:1px solid #ddd;width:200px}
+    .result{white-space:pre-wrap;margin-top:12px;padding:12px;border-radius:8px;background:#0f172a;color:white}
+    .success{background:#064e3b}
+    .error{background:#7f1d1d}
+    footer{margin-top:24px;color:var(--muted);font-size:13px;text-align:center}
+    @media(max-width:640px){ .controls{flex-direction:column;align-items:flex-start} input[type="text"], input[type="number"]{width:100%} }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Ticket Shop — Razorpay Demo</h1>
+      <div class="controls">
+        <label class="small">API Base:</label>
+        <input id="apiBase" type="text" value="http://127.0.0.1:8000" />
+        <label class="small">Razorpay Key (public):</label>
+        <input id="rzpKey" type="text" value="rzp_test_YOUR_KEY_HERE" />
+        <label class="small">JWT (optional):</label>
+        <input id="token" type="text" placeholder="Bearer token (optional)" />
+        <button class="ghost" id="refreshBtn">Refresh</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div>
+          <strong>Available Tickets</strong>
+          <div class="small">Click Buy to start payment flow</div>
+        </div>
+        <div class="small">Tip: fill user_id to attach payment to a user</div>
+      </div>
+
+      <div id="tickets" class="tickets"></div>
+      <div id="ticketsEmpty" style="display:none;color:var(--muted)">No tickets found.</div>
+    </section>
+
+    <section class="card">
+      <strong>Quick Buy (manual)</strong>
+      <div style="margin-top:8px" class="flex">
+        <label>User ID</label>
+        <input id="manualUserId" type="number" placeholder="1" />
+        <label>Amount (₹)</label>
+        <input id="manualAmount" type="number" placeholder="100" />
+        <label>Ticket ID (optional)</label>
+        <input id="manualTicketId" type="number" placeholder="1" />
+        <button class="primary" id="manualBuyBtn">Create Order & Checkout</button>
+      </div>
+      <div id="manualResult" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <strong>Manual Verify</strong>
+      <div style="margin-top:8px" class="flex">
+        <label>order_id</label><input id="verify_order" type="text" placeholder="order_xxx" />
+        <label>payment_id</label><input id="verify_payment" type="text" placeholder="pay_xxx" />
+        <label>signature</label><input id="verify_signature" type="text" placeholder="signature" />
+        <button class="primary" id="verifyBtn">Verify</button>
+      </div>
+      <div id="verifyResult" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <strong>Last activity</strong>
+      <div id="log" class="small">— no activity yet —</div>
+      <div id="resultBox"></div>
+    </section>
+
+    <footer>
+      Built for TicketManagement backend. Ensure backend CORS allows this origin (or use `*` during dev).
+    </footer>
+  </div>
+
+  <!-- Razorpay checkout script (loaded dynamically below) -->
+  <script>
+    // -----------------------------
+    // Config: edit these by setting the inputs at top of page
+    // -----------------------------
+    function apiBase() { return document.getElementById('apiBase').value.trim(); }
+    function rzpKey() { return document.getElementById('rzpKey').value.trim(); }
+    function authToken() { return document.getElementById('token').value.trim(); }
+
+    // Convenience: set headers (include Authorization if token present)
+    function makeHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      const t = authToken();
+      if (t) headers['Authorization'] = t.startsWith('Bearer') ? t : `Bearer ${t}`;
+      return headers;
+    }
+
+    // Utility: pretty log
+    function info(msg) {
+      document.getElementById('log').textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    }
+    function showResult(obj, status='info') {
+      const box = document.getElementById('resultBox');
+      box.innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(obj, null, 2);
+      pre.className = 'result ' + (status==='ok'? 'success' : (status==='err' ? 'error' : ''));
+      box.appendChild(pre);
+    }
+
+    // Load tickets and render
+    async function loadTickets() {
+      info('Fetching tickets...');
+      const ticketsEl = document.getElementById('tickets');
+      const emptyEl = document.getElementById('ticketsEmpty');
+      ticketsEl.innerHTML = '';
+      try {
+        const res = await fetch(`${apiBase()}/tickets`, { headers: makeHeaders() });
+        if (!res.ok) {
+          const txt = await res.text();
+          info('Failed to fetch tickets: ' + res.status + ' ' + txt);
+          ticketsEl.innerHTML = `<div style="color:var(--muted)">Failed to fetch tickets: ${res.status}</div>`;
+          return;
+        }
+        const tickets = await res.json();
+        if (!Array.isArray(tickets) || tickets.length === 0) {
+          emptyEl.style.display = 'block';
+          return;
+        }
+        emptyEl.style.display = 'none';
+        tickets.forEach(t => {
+          const node = document.createElement('div');
+          node.className = 'ticket';
+          node.innerHTML = `
+            <div style="display:flex;justify-content:space-between">
+              <h3>${escapeHtml(t.title || ('Ticket #' + t.id))}</h3>
+              <div class="price">₹ ${t.price ?? '—'}</div>
+            </div>
+            <p>${escapeHtml(t.description || '')}</p>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+              <div class="small">ID: ${t.id}</div>
+              <div style="display:flex;gap:8px">
+                <button class="ghost" onclick="fillPurchase(${t.id}, ${t.price ?? 0})">Fill</button>
+                <button class="primary" onclick="buyTicket(${t.id}, ${t.price ?? 0})">Buy</button>
+              </div>
+            </div>
+          `;
+          ticketsEl.appendChild(node);
+        });
+        info('Tickets loaded.');
+      } catch (err) {
+        info('Exception fetching tickets: ' + err.message);
+        ticketsEl.innerHTML = `<div style="color:var(--muted)">Exception: ${err.message}</div>`;
+      }
+    }
+
+    // escape helper
+    function escapeHtml(s){ return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+    // Fill manual form fields with chosen ticket
+    function fillPurchase(ticketId, price) {
+      document.getElementById('manualTicketId').value = ticketId;
+      document.getElementById('manualAmount').value = price;
+      info(`Filled ticket ${ticketId} (₹${price})`);
+    }
+
+    // Create order and open Razorpay checkout
+    async function buyTicket(ticketId, price) {
+      const uid = parseInt(document.getElementById('manualUserId').value) || null;
+      const payload = {
+        amount: Math.round(price),   // rupees expected by backend
+        currency: 'INR',
+        receipt: `ticket_${ticketId}_${Date.now()}`,
+        user_id: uid,
+        ticket_id: ticketId
+      };
+      return startOrderFlow(payload);
+    }
+
+    // Manual quick-buy button
+    document.getElementById('manualBuyBtn').addEventListener('click', async () => {
+      const amount = Number(document.getElementById('manualAmount').value);
+      const ticketId = document.getElementById('manualTicketId').value ? Number(document.getElementById('manualTicketId').value) : null;
+      const userId = document.getElementById('manualUserId').value ? Number(document.getElementById('manualUserId').value) : null;
+      if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
+      const payload = { amount: Math.round(amount), currency: 'INR', receipt: `manual_${Date.now()}`, user_id: userId, ticket_id: ticketId };
+      await startOrderFlow(payload);
+    });
+
+    // Entry for create-order -> open Razorpay
+    async function startOrderFlow(payload) {
+      info('Creating order on backend...');
+      showResult({ status: 'creating_order', payload }, 'info');
+      try {
+        const res = await fetch(`${apiBase()}/payments/create-order`, {
+          method: 'POST',
+          headers: makeHeaders(),
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          info('Create order failed: ' + (data.detail || res.status));
+          showResult({ error: data }, 'err');
+          return;
+        }
+
+        // Backend should return order_id and razorpay_order (object)
+        const orderId = data.order_id || (data.razorpay_order && data.razorpay_order.id);
+        const razorpayOrder = data.razorpay_order || {};
+        info('Order created: ' + orderId);
+        showResult({ create_order_response: data }, 'info');
+
+        // Open Razorpay checkout
+        await openRazorpay(razorpayOrder, payload);
+
+        return data;
+      } catch (err) {
+        info('Exception creating order: ' + err.message);
+        showResult({ exception: err.message }, 'err');
+      }
+    }
+
+    // Dynamically load Razorpay script if not loaded, then open checkout
+    function loadRazorpayScript() {
+      return new Promise((resolve, reject) => {
+        if (window.Razorpay) return resolve(true);
+        const s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.onload = () => resolve(true);
+        s.onerror = () => reject(new Error('Failed to load Razorpay script'));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function openRazorpay(razorpayOrder, originalPayload) {
+      try {
+        await loadRazorpayScript();
+      } catch (err) {
+        showResult({ error: 'Could not load Razorpay' }, 'err');
+        return;
+      }
+
+      const options = {
+        key: rzpKey(), // public key
+        amount: razorpayOrder.amount || (originalPayload.amount * 100),
+        currency: razorpayOrder.currency || originalPayload.currency || 'INR',
+        name: 'TicketManagement',
+        description: `Ticket ${originalPayload.ticket_id ?? ''}`,
+        order_id: razorpayOrder.id || originalPayload.order_id, // must be razorpay order id
+        handler: async function (response) {
+          // response: { razorpay_payment_id, razorpay_order_id, razorpay_signature }
+          info('Checkout success — verifying...');
+          showResult({ checkout_response: response }, 'info');
+          await verifyPayment({
+            order_id: response.razorpay_order_id,
+            payment_id: response.razorpay_payment_id,
+            signature: response.razorpay_signature
+          });
+        },
+        prefill: { name: '', email: '' },
+        theme: { color: '#2563eb' }
+      };
+
+      try {
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (resp){
+          info('Payment failed: ' + (resp.error && resp.error.description));
+          showResult({ payment_failed: resp.error }, 'err');
+        });
+        rzp.open();
+      } catch (err) {
+        showResult({ open_error: err.message }, 'err');
+      }
+    }
+
+    // Verify payment by calling backend POST /payments/verify
+    async function verifyPayment(payload) {
+      info('Verifying payment with backend...');
+      try {
+        const res = await fetch(`${apiBase()}/payments/verify`, {
+          method: 'POST',
+          headers: makeHeaders(),
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          info('Payment verified (backend OK)');
+          showResult({ verify_response: data }, 'ok');
+        } else {
+          info('Verify failed: ' + (data.detail || res.status));
+          showResult({ verify_error: data }, 'err');
+        }
+      } catch (err) {
+        showResult({ verify_exception: err.message }, 'err');
+        info('Exception verifying payment: ' + err.message);
+      }
+    }
+
+    // Manual verify button
+    document.getElementById('verifyBtn').addEventListener('click', async () => {
+      const order_id = document.getElementById('verify_order').value.trim();
+      const payment_id = document.getElementById('verify_payment').value.trim();
+      const signature = document.getElementById('verify_signature').value.trim();
+      if (!order_id || !payment_id || !signature) { alert('Enter all fields'); return; }
+      await verifyPayment({ order_id, payment_id, signature });
+    });
+
+    // Refresh button reloads tickets
+    document.getElementById('refreshBtn').addEventListener('click', loadTickets);
+
+    // initial load
+    loadTickets();
+
+    // Optional: easy keyboard shortcuts
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'r' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); loadTickets(); }
+    });
+  </script>
+</body>
+</html>

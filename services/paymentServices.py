@@ -8,31 +8,42 @@ class PaymentService:
     @staticmethod
     def create_order(db, payload: PaymentCreateRequest):
         try:
-            # Convert to paise (Razorpay requires paise)
+        # Convert to paise (Razorpay requires paise)
             amount_in_paise = payload.amount * 100
 
+        # Create Razorpay order
             order = razorpay_client.order.create({
                 "amount": amount_in_paise,
                 "currency": payload.currency,
-                "receipt": payload.receipt or "receipt#1",
+                "receipt": payload.receipt or "",
                 "payment_capture": 1
             })
 
-            # Save order in DB
+            order_id = order.get("id")
+            if not order_id:
+                raise Exception("Razorpay did not return an order id")
+
+        # Persist our own Payment record and link user/ticket if provided
             PaymentRepository.create_payment(
                 db=db,
-                order_id=order["id"],
+                order_id=order_id,
                 amount=payload.amount,
                 currency=payload.currency,
-                status=order["status"]
+                status="created",
+                user_id=payload.user_id,
+                ticket_id=payload.ticket_id
             )
 
-            return order
+        # return order info to client
+            return {
+                "order_id": order_id,
+                "amount": payload.amount,
+                "currency": payload.currency,
+                "razorpay_order": order
+            }
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create Razorpay order: {str(e)}"
-            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create Razorpay order: {str(e)}")
+
 
     @staticmethod
     def verify_payment(db, payload: PaymentVerifyRequest):

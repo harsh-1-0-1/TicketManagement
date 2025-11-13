@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
-from models.paymentModel import Payment  # assume you have a Payment model
+from models.paymentModel import Payment
 
 class PaymentRepository:
     @staticmethod
-    def create_payment(db: Session, order_id: str, amount: int, currency: str, status: str):
-        payment = Payment(order_id=order_id, amount=amount, currency=currency, status=status)
+    def create_payment(db: Session, order_id: str, amount: int, currency: str, status: str, user_id: int = None, ticket_id: int = None):
+        payment = Payment(order_id=order_id, amount=amount, currency=currency, status=status, user_id=user_id, ticket_id=ticket_id)
         db.add(payment)
         db.commit()
         db.refresh(payment)
@@ -18,3 +18,7 @@ class PaymentRepository:
             db.commit()
             db.refresh(payment)
         return payment
+
+    @staticmethod
+    def get_by_order_id(db: Session, order_id: str):
+        return db.query(Payment).filter(Payment.order_id == order_id).first()
